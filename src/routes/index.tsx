@@ -54,6 +54,8 @@ function IndiaLandHome() {
 
   const activeDestination = destinations.find((item) => item.city === selectedCity) ?? destinations[0];
 
+  if (!activeDestination) return null;
+
   const chooseCity = (city: string) => {
     setSelectedCity(city);
     setQuery(city);
