@@ -189,7 +189,7 @@ export const getDirections = createServerFn({ method: "POST" })
       mapsFetch("/routes/directions/v2:computeRoutes", {
         method: "POST",
         headers: mapsHeaders({ "X-Goog-FieldMask": mask }),
-        body: JSON.stringify({ origin, destination, travelMode, languageCode: "en-IN", units: "METRIC" }),
+        body: JSON.stringify({ origin, destination, travelMode, languageCode: "en", units: "METRIC" }),
       });
     let mode = "TRANSIT";
     let json = await call("TRANSIT").catch(() => ({ routes: [] }));
