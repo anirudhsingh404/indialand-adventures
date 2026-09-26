@@ -76,7 +76,7 @@ export const searchPlaces = createServerFn({ method: "POST" })
       languageCode: "en",
       regionCode: "IN",
     };
-    if (data.pageToken) body.pageToken = data.pageToken;
+    if (data.pageToken) body['pageToken'] = data.pageToken;
     const json = await mapsFetch("/places/v1/places:searchText", {
       method: "POST",
       headers: mapsHeaders({
