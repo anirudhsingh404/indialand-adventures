@@ -159,7 +159,7 @@ export const getDirections = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data }) => {
-    const mode = "DRIVE";
+    const mode: string = "DRIVE";
     const o = "address" in data.origin ? await geocode(data.origin.address) : data.origin;
     if (!o) return { mode, found: false as const };
     const url = `https://router.project-osrm.org/route/v1/driving/${o.lng},${o.lat};${data.destination.lng},${data.destination.lat}?overview=false&steps=true`;
