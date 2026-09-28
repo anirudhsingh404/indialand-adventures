@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { AlertTriangle, Bus, Car, CloudSun, Droplets, ExternalLink, Footprints, Loader2, MapPin, Navigation, Star, TrainFront, Wind, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { getDirections, getPlacePhoto, getTravelAdvice, getWeather, searchPlaces, type PlaceResult } from "@/lib/travel.functions";
 
