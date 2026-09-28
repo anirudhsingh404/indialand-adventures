@@ -1,14 +1,11 @@
-import { Link } from "@tanstack/react-router";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { AlertTriangle, Bus, Car, CloudSun, Droplets, ExternalLink, Footprints, Loader2, MapPin, Navigation, Star, TrainFront, Wind, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/hooks/useAuth";
 import { getDirections, getPlacePhoto, getTravelAdvice, getWeather, searchPlaces, type PlaceResult } from "@/lib/travel.functions";
 
 export function PlanOverlay({ query, onClose }: { query: string; onClose: () => void }) {
-  const { user, ready } = useAuth();
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
