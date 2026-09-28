@@ -1,14 +1,11 @@
-import { Link } from "@tanstack/react-router";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { AlertTriangle, Bus, Car, CloudSun, Droplets, ExternalLink, Footprints, Loader2, MapPin, Navigation, Star, TrainFront, Wind, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/hooks/useAuth";
 import { getDirections, getPlacePhoto, getTravelAdvice, getWeather, searchPlaces, type PlaceResult } from "@/lib/travel.functions";
 
 export function PlanOverlay({ query, onClose }: { query: string; onClose: () => void }) {
-  const { user, ready } = useAuth();
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -29,15 +26,7 @@ export function PlanOverlay({ query, onClose }: { query: string; onClose: () => 
         </div>
       </div>
       <div className="mx-auto max-w-[1440px] px-5 py-8 lg:px-10">
-        {!ready ? <Spinner label="Checking your account" /> : !user ? (
-          <div className="animate-rise-in mx-auto max-w-lg rounded-xl border border-cream/15 bg-cream/5 p-8 text-center">
-            <h3 className="font-display text-3xl font-semibold">Sign in to plan {query}</h3>
-            <p className="mt-3 text-cream/65">Live places with ratings, scam alerts, public transport directions and real-time weather are available to members.</p>
-            <div className="mt-6 flex justify-center gap-3">
-              <Button asChild className="bg-saffron text-ink hover:bg-saffron/90"><Link to="/auth">Sign in or sign up</Link></Button>
-            </div>
-          </div>
-        ) : <PlanContent query={query} />}
+        <PlanContent query={query} />
       </div>
     </div>
   );

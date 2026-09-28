@@ -1,6 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 const GATEWAY_URL = "https://connector-gateway.lovable.dev/google_maps";
 
@@ -67,7 +66,6 @@ async function photoUri(name: string) {
 }
 
 export const searchPlaces = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ query: z.string().trim().min(2).max(80), pageToken: z.string().max(500).optional() }).parse(d))
   .handler(async ({ data }) => {
     const body: Record<string, unknown> = {
@@ -118,12 +116,10 @@ export const searchPlaces = createServerFn({ method: "POST" })
   });
 
 export const getPlacePhoto = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ name: z.string().regex(/^places\/[^/]+\/photos\/[^/]+$/) }).parse(d))
   .handler(async ({ data }) => ({ uri: await photoUri(data.name) }));
 
 export const getWeather = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).parse(d))
   .handler(async ({ data }) => {
     const q = `location.latitude=${data.lat}&location.longitude=${data.lng}`;
@@ -169,7 +165,6 @@ export type TransitStep = {
 };
 
 export const getDirections = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
   .inputValidator((d) =>
     z
       .object({
@@ -249,7 +244,6 @@ export const getDirections = createServerFn({ method: "POST" })
   });
 
 export const getTravelAdvice = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ place: z.string().trim().min(2).max(80) }).parse(d))
   .handler(async ({ data }) => {
     const key = process.env["LOVABLE_API_KEY"];
