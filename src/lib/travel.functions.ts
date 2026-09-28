@@ -3,27 +3,71 @@ import { z } from "zod";
 
 const GATEWAY_URL = "https://connector-gateway.lovable.dev/google_maps";
 
+const DIRECT_HOSTS: Record<string, string> = {
+  places: "https://places.googleapis.com",
+  routes: "https://routes.googleapis.com",
+  weather: "https://weather.googleapis.com",
+};
+
+function directKey() {
+  return process.env["GOOGLE_MAPS_SERVER_KEY"] || null;
+}
+
 function mapsHeaders(extra: Record<string, string> = {}) {
+  const base = { "Content-Type": "application/json", ...extra };
+  if (directKey()) return base;
   const lovableKey = process.env["LOVABLE_API_KEY"];
   const mapsKey = process.env["GOOGLE_MAPS_API_KEY"];
-  if (!lovableKey || !mapsKey) throw new Error("Google Maps is not connected");
+  if (!lovableKey || !mapsKey) {
+    throw new Error(
+      "Google Maps is not configured. Add a GOOGLE_MAPS_SERVER_KEY environment variable with Places API (New), Routes API and Weather API enabled.",
+    );
+  }
   return {
     Authorization: `Bearer ${lovableKey}`,
     "X-Connection-Api-Key": mapsKey,
-    "Content-Type": "application/json",
-    ...extra,
+    ...base,
   };
 }
 
+/** Builds either a direct Google Maps Platform URL (when GOOGLE_MAPS_SERVER_KEY is set) or a gateway URL. */
+function mapsUrl(path: string) {
+  const key = directKey();
+  if (!key) return `${GATEWAY_URL}${path}`;
+  const [pathname, search = ""] = path.replace(/^\//, "").split("?");
+  const segments = pathname!.split("/");
+  const host = DIRECT_HOSTS[segments[0]!];
+  if (!host) throw new Error(`Unsupported Google Maps path: ${path}`);
+  const params = new URLSearchParams(search);
+  params.set("key", key);
+  return `${host}/${segments.slice(1).join("/")}?${params.toString()}`;
+}
+
 async function mapsFetch(path: string, init: RequestInit) {
-  const res = await fetch(`${GATEWAY_URL}${path}`, init);
+  const res = await fetch(mapsUrl(path), init);
   if (!res.ok) {
     const body = await res.text();
     console.error(`Maps request failed [${res.status}]: ${body}`);
+    if (res.status === 403) {
+      let reason: string | undefined;
+      try {
+        reason = (JSON.parse(body)?.error?.details ?? []).find((d: { reason?: string }) => d.reason)?.reason;
+      } catch {
+        reason = undefined;
+      }
+      if (reason === "API_KEY_HTTP_REFERRER_BLOCKED") {
+        throw new Error('Google Maps key is referrer-restricted. Set its application restrictions to "None" or "IP addresses".');
+      }
+      if (reason === "API_KEY_SERVICE_BLOCKED") {
+        throw new Error("Google Maps key does not allow this API. Add Places API (New), Routes API and Weather API to the key's allowed APIs.");
+      }
+      throw new Error("Google Maps request was denied (403). Check the API key restrictions.");
+    }
     throw new Error(`Maps request failed [${res.status}]`);
   }
   return res.json();
 }
+
 
 export type PlaceResult = {
   id: string;
