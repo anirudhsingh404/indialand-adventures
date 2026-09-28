@@ -54,7 +54,7 @@ function PlanContent({ query }: { query: string }) {
       <section>
         <div className="flex items-end justify-between gap-3">
           <h3 className="font-display text-3xl font-semibold">Top rated places</h3>
-          <span className="text-sm text-cream/55">{list.length} found · sorted by rating</span>
+          <span className="text-sm text-cream/55">{list.length} found · sorted by popularity</span>
         </div>
         {places.isPending && <Spinner label="Finding the best places" />}
         {places.isError && <p className="mt-4 text-sm text-destructive">Couldn't load places: {places.error.message}</p>}
@@ -151,7 +151,7 @@ function Directions({ place }: { place: PlaceResult }) {
       {q.data && !q.data.found && <p className="mt-3 text-sm text-cream/60">No route found from there. Try a nearby station or landmark.</p>}
       {q.data?.found && (
         <div className="mt-3">
-          <p className="text-sm font-semibold">{q.data.mode === "TRANSIT" ? "Public transport" : "By road (no public transport route available)"} · {q.data.duration} · {q.data.distance}</p>
+          <p className="text-sm font-semibold">{q.data.mode === "TRANSIT" ? "Public transport" : "By road — use app cab, auto or local bus along this route"} · {q.data.duration} · {q.data.distance}</p>
           <ol className="mt-3 grid gap-2">
             {q.data.steps.map((s, i) => (
               <li key={i} className="flex gap-3 text-sm">

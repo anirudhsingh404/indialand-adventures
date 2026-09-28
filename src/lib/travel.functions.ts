@@ -1,73 +1,25 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-const GATEWAY_URL = "https://connector-gateway.lovable.dev/google_maps";
+const UA = { "User-Agent": "IndiaLand/1.0 (travel planner; contact: indialand-adventures.lovable.app)", Accept: "application/json" };
 
-const DIRECT_HOSTS: Record<string, string> = {
-  places: "https://places.googleapis.com",
-  routes: "https://routes.googleapis.com",
-  weather: "https://weather.googleapis.com",
-};
-
-function directKey() {
-  return process.env["GOOGLE_MAPS_SERVER_KEY"] || null;
-}
-
-function mapsHeaders(extra: Record<string, string> = {}) {
-  const base = { "Content-Type": "application/json", ...extra };
-  if (directKey()) return base;
-  const lovableKey = process.env["LOVABLE_API_KEY"];
-  const mapsKey = process.env["GOOGLE_MAPS_API_KEY"];
-  if (!lovableKey || !mapsKey) {
-    throw new Error(
-      "Google Maps is not configured. Add a GOOGLE_MAPS_SERVER_KEY environment variable with Places API (New), Routes API and Weather API enabled.",
-    );
-  }
-  return {
-    Authorization: `Bearer ${lovableKey}`,
-    "X-Connection-Api-Key": mapsKey,
-    ...base,
-  };
-}
-
-/** Builds either a direct Google Maps Platform URL (when GOOGLE_MAPS_SERVER_KEY is set) or a gateway URL. */
-function mapsUrl(path: string) {
-  const key = directKey();
-  if (!key) return `${GATEWAY_URL}${path}`;
-  const [pathname, search = ""] = path.replace(/^\//, "").split("?");
-  const segments = pathname!.split("/");
-  const host = DIRECT_HOSTS[segments[0]!];
-  if (!host) throw new Error(`Unsupported Google Maps path: ${path}`);
-  const params = new URLSearchParams(search);
-  params.set("key", key);
-  return `${host}/${segments.slice(1).join("/")}?${params.toString()}`;
-}
-
-async function mapsFetch(path: string, init: RequestInit) {
-  const res = await fetch(mapsUrl(path), init);
+async function getJson(url: string) {
+  const res = await fetch(url, { headers: UA });
   if (!res.ok) {
     const body = await res.text();
-    console.error(`Maps request failed [${res.status}]: ${body}`);
-    if (res.status === 403) {
-      let reason: string | undefined;
-      try {
-        reason = (JSON.parse(body)?.error?.details ?? []).find((d: { reason?: string }) => d.reason)?.reason;
-      } catch {
-        reason = undefined;
-      }
-      if (reason === "API_KEY_HTTP_REFERRER_BLOCKED") {
-        throw new Error('Google Maps key is referrer-restricted. Set its application restrictions to "None" or "IP addresses".');
-      }
-      if (reason === "API_KEY_SERVICE_BLOCKED") {
-        throw new Error("Google Maps key does not allow this API. Add Places API (New), Routes API and Weather API to the key's allowed APIs.");
-      }
-      throw new Error("Google Maps request was denied (403). Check the API key restrictions.");
-    }
-    throw new Error(`Maps request failed [${res.status}]`);
+    console.error(`Request failed [${res.status}] ${url}: ${body.slice(0, 300)}`);
+    throw new Error(`Place data request failed [${res.status}]`);
   }
   return res.json();
 }
 
+/** Free geocoding via OpenStreetMap Nominatim */
+async function geocode(q: string) {
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=in&q=${encodeURIComponent(q)}`;
+  const arr = (await getJson(url)) as Array<{ lat: string; lon: string; display_name: string }>;
+  if (!arr[0]) return null;
+  return { lat: Number(arr[0].lat), lng: Number(arr[0].lon), name: arr[0].display_name };
+}
 
 export type PlaceResult = {
   id: string;
@@ -85,111 +37,91 @@ export type PlaceResult = {
   score: number;
 };
 
-type RawPlace = {
-  id: string;
-  displayName?: { text: string };
-  formattedAddress?: string;
-  rating?: number;
-  userRatingCount?: number;
-  primaryTypeDisplayName?: { text: string };
-  editorialSummary?: { text: string };
-  googleMapsUri?: string;
-  location?: { latitude: number; longitude: number };
-  photos?: { name: string }[];
+const SKIP = /\b(school|college|university|hospital|station|railway|airport|company|constituency|ward|bank|hotel|district|village|suburb|neighbourhood|locality|road|street|metro|office|stadium|election|club|clinic|institute)\b/i;
+
+type WikiPage = {
+  pageid: number;
+  title: string;
+  description?: string;
+  extract?: string;
+  coordinates?: { lat: number; lon: number }[];
+  thumbnail?: { source: string };
+  pageviews?: Record<string, number | null>;
 };
 
-async function photoUri(name: string) {
-  try {
-    const data = await mapsFetch(`/places/v1/${name}/media?maxWidthPx=800&skipHttpRedirect=true`, {
-      headers: mapsHeaders(),
-    });
-    return (data.photoUri as string) ?? null;
-  } catch {
-    return null;
-  }
-}
-
+/** Free place data: OpenStreetMap geocoding + Wikipedia nearby articles ranked by reader popularity. */
 export const searchPlaces = createServerFn({ method: "POST" })
   .inputValidator((d) => z.object({ query: z.string().trim().min(2).max(80), pageToken: z.string().max(500).optional() }).parse(d))
   .handler(async ({ data }) => {
-    const body: Record<string, unknown> = {
-      textQuery: `top tourist attractions in ${data.query}, India`,
-      pageSize: 20,
-      languageCode: "en",
-      regionCode: "IN",
-    };
-    if (data.pageToken) body['pageToken'] = data.pageToken;
-    const json = await mapsFetch("/places/v1/places:searchText", {
-      method: "POST",
-      headers: mapsHeaders({
-        "X-Goog-FieldMask":
-          "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.primaryTypeDisplayName,places.editorialSummary,places.googleMapsUri,places.location,places.photos,nextPageToken",
-      }),
-      body: JSON.stringify(body),
+    const loc = await geocode(`${data.query}, India`);
+    if (!loc) return { places: [] as PlaceResult[], nextPageToken: null };
+    const params = new URLSearchParams({
+      action: "query", format: "json", formatversion: "2", origin: "*",
+      generator: "geosearch", ggscoord: `${loc.lat}|${loc.lng}`, ggsradius: "10000", ggslimit: "100",
+      prop: "coordinates|pageimages|description|extracts|pageviews",
+      piprop: "thumbnail", pithumbsize: "800", exintro: "1", explaintext: "1", exsentences: "2", exlimit: "max", pvipdays: "30",
     });
-    const raw: RawPlace[] = json.places ?? [];
-    const places: PlaceResult[] = raw
-      .filter((p) => p.location)
+    const json = await getJson(`https://en.wikipedia.org/w/api.php?${params}`);
+    const pages: WikiPage[] = json.query?.pages ?? [];
+    const all: PlaceResult[] = pages
+      .filter((p) => p.coordinates?.[0] && !SKIP.test(`${p.title} ${p.description ?? ""}`) && p.title !== data.query)
       .map((p) => {
-        const rating = p.rating ?? null;
-        const count = p.userRatingCount ?? 0;
+        const views = Object.values(p.pageviews ?? {}).reduce<number>((a, v) => a + (v ?? 0), 0);
         return {
-          id: p.id,
-          name: p.displayName?.text ?? "Unnamed place",
-          address: p.formattedAddress ?? "",
-          rating,
-          ratingCount: count,
-          type: p.primaryTypeDisplayName?.text ?? null,
-          summary: p.editorialSummary?.text ?? null,
-          mapsUrl: p.googleMapsUri ?? null,
-          lat: p.location!.latitude,
-          lng: p.location!.longitude,
-          photoName: p.photos?.[0]?.name ?? null,
-          photoUri: null,
-          score: (rating ?? 0) * Math.log10(count + 10),
+          id: String(p.pageid),
+          name: p.title,
+          address: p.description ?? loc.name.split(",").slice(0, 2).join(","),
+          rating: null,
+          ratingCount: views,
+          type: p.description ?? null,
+          summary: p.extract ?? null,
+          mapsUrl: `https://www.openstreetmap.org/?mlat=${p.coordinates![0]!.lat}&mlon=${p.coordinates![0]!.lon}#map=17/${p.coordinates![0]!.lat}/${p.coordinates![0]!.lon}`,
+          lat: p.coordinates![0]!.lat,
+          lng: p.coordinates![0]!.lon,
+          photoName: null,
+          photoUri: p.thumbnail?.source ?? null,
+          score: views + (p.thumbnail ? 500 : 0),
         };
       })
       .sort((a, b) => b.score - a.score);
-    // Photos for the top 8 only, to keep usage bounded
-    await Promise.all(
-      places.slice(0, 8).map(async (p) => {
-        if (p.photoName) p.photoUri = await photoUri(p.photoName);
-      }),
-    );
-    return { places, nextPageToken: (json.nextPageToken as string | undefined) ?? null };
+    const offset = Number(data.pageToken ?? 0) || 0;
+    const places = all.slice(offset, offset + 20);
+    return { places, nextPageToken: offset + 20 < all.length ? String(offset + 20) : null };
   });
 
 export const getPlacePhoto = createServerFn({ method: "POST" })
-  .inputValidator((d) => z.object({ name: z.string().regex(/^places\/[^/]+\/photos\/[^/]+$/) }).parse(d))
-  .handler(async ({ data }) => ({ uri: await photoUri(data.name) }));
+  .inputValidator((d) => z.object({ name: z.string().max(300) }).parse(d))
+  .handler(async () => ({ uri: null as string | null }));
 
+const WMO: Record<number, string> = {
+  0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast", 45: "Fog", 48: "Rime fog",
+  51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle", 61: "Light rain", 63: "Rain", 65: "Heavy rain",
+  71: "Light snow", 73: "Snow", 75: "Heavy snow", 80: "Rain showers", 81: "Rain showers", 82: "Violent showers",
+  95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Thunderstorm with hail",
+};
+
+/** Free real-time weather via Open-Meteo (no key) */
 export const getWeather = createServerFn({ method: "POST" })
   .inputValidator((d) => z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).parse(d))
   .handler(async ({ data }) => {
-    const q = `location.latitude=${data.lat}&location.longitude=${data.lng}`;
-    const [now, days] = await Promise.all([
-      mapsFetch(`/weather/v1/currentConditions:lookup?${q}`, { headers: mapsHeaders() }),
-      mapsFetch(`/weather/v1/forecast/days:lookup?${q}&days=5`, { headers: mapsHeaders() }).catch(() => null),
-    ]);
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${data.lat}&longitude=${data.lng}&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&forecast_days=5&timezone=Asia%2FKolkata`;
+    const j = await getJson(url);
+    const c = j.current ?? {};
+    const d = j.daily ?? {};
     return {
-      temp: now.temperature?.degrees ?? null,
-      feelsLike: now.feelsLikeTemperature?.degrees ?? null,
-      condition: now.weatherCondition?.description?.text ?? "—",
-      icon: now.weatherCondition?.iconBaseUri ? `${now.weatherCondition.iconBaseUri}.svg` : null,
-      humidity: now.relativeHumidity ?? null,
-      wind: now.wind?.speed?.value ?? null,
-      rainChance: now.precipitation?.probability?.percent ?? null,
-      forecast: ((days?.forecastDays ?? []) as Array<{
-        displayDate?: { year: number; month: number; day: number };
-        maxTemperature?: { degrees: number };
-        minTemperature?: { degrees: number };
-        daytimeForecast?: { weatherCondition?: { description?: { text: string }; iconBaseUri?: string } };
-      }>).map((d) => ({
-        date: d.displayDate ? `${d.displayDate.year}-${String(d.displayDate.month).padStart(2, "0")}-${String(d.displayDate.day).padStart(2, "0")}` : "",
-        max: d.maxTemperature?.degrees ?? null,
-        min: d.minTemperature?.degrees ?? null,
-        condition: d.daytimeForecast?.weatherCondition?.description?.text ?? "",
-        icon: d.daytimeForecast?.weatherCondition?.iconBaseUri ? `${d.daytimeForecast.weatherCondition.iconBaseUri}.svg` : null,
+      temp: c.temperature_2m ?? null,
+      feelsLike: c.apparent_temperature ?? null,
+      condition: WMO[c.weather_code as number] ?? "—",
+      icon: null as string | null,
+      humidity: c.relative_humidity_2m ?? null,
+      wind: c.wind_speed_10m ?? null,
+      rainChance: c.precipitation_probability ?? null,
+      forecast: ((d.time ?? []) as string[]).map((date, i) => ({
+        date,
+        max: d.temperature_2m_max?.[i] ?? null,
+        min: d.temperature_2m_min?.[i] ?? null,
+        condition: WMO[d.weather_code?.[i] as number] ?? "",
+        icon: null as string | null,
       })),
     };
   });
@@ -208,6 +140,15 @@ export type TransitStep = {
   stops: number | null;
 };
 
+function fmtDur(s: number) {
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  return h ? `${h} hr ${m} min` : `${m} min`;
+}
+function fmtDist(m: number) {
+  return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+}
+
+/** Free road routing via the public OSRM server (OpenStreetMap data). */
 export const getDirections = createServerFn({ method: "POST" })
   .inputValidator((d) =>
     z
@@ -218,73 +159,29 @@ export const getDirections = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data }) => {
-    const origin = "address" in data.origin
-      ? { address: data.origin.address }
-      : { location: { latLng: { latitude: data.origin.lat, longitude: data.origin.lng } } };
-    const destination = { location: { latLng: { latitude: data.destination.lat, longitude: data.destination.lng } } };
-    const mask =
-      "routes.duration,routes.distanceMeters,routes.localizedValues,routes.legs.steps.travelMode,routes.legs.steps.navigationInstruction,routes.legs.steps.localizedValues,routes.legs.steps.transitDetails";
-    const call = (travelMode: string) =>
-      mapsFetch("/routes/directions/v2:computeRoutes", {
-        method: "POST",
-        headers: mapsHeaders({ "X-Goog-FieldMask": mask }),
-        body: JSON.stringify({ origin, destination, travelMode, languageCode: "en", units: "METRIC" }),
-      });
-    let mode = "TRANSIT";
-    let json = await call("TRANSIT").catch(() => ({ routes: [] }));
-    if (!json.routes?.length) {
-      mode = "DRIVE";
-      json = await call("DRIVE").catch(() => ({ routes: [] }));
-    }
-    const route = json.routes?.[0];
+    const mode = "DRIVE";
+    const o = "address" in data.origin ? await geocode(data.origin.address) : data.origin;
+    if (!o) return { mode, found: false as const };
+    const url = `https://router.project-osrm.org/route/v1/driving/${o.lng},${o.lat};${data.destination.lng},${data.destination.lat}?overview=false&steps=true`;
+    const j = await getJson(url).catch(() => null);
+    const route = j?.routes?.[0];
     if (!route) return { mode, found: false as const };
-    type RawStep = {
-      travelMode?: string;
-      navigationInstruction?: { instructions?: string };
-      localizedValues?: { staticDuration?: { text: string }; distance?: { text: string } };
-      transitDetails?: {
-        stopDetails?: { departureStop?: { name: string }; arrivalStop?: { name: string } };
-        localizedValues?: { departureTime?: { time?: { text: string } }; arrivalTime?: { time?: { text: string } } };
-        headsign?: string;
-        stopCount?: number;
-        transitLine?: { name?: string; nameShort?: string; vehicle?: { name?: { text: string } } };
-      };
-    };
-    const rawSteps: RawStep[] = route.legs?.flatMap((l: { steps?: RawStep[] }) => l.steps ?? []) ?? [];
-    // Merge consecutive walking steps so the list stays readable
-    const steps: TransitStep[] = [];
-    for (const s of rawSteps) {
-      const t = s.transitDetails;
-      const step: TransitStep = {
-        mode: s.travelMode ?? mode,
-        instruction: t
-          ? `Take ${t.transitLine?.vehicle?.name?.text ?? "transit"} ${t.transitLine?.nameShort ?? t.transitLine?.name ?? ""} towards ${t.headsign ?? "destination"}`.replace(/\s+/g, " ")
-          : s.navigationInstruction?.instructions ?? (s.travelMode === "WALK" ? "Walk" : "Continue"),
-        duration: s.localizedValues?.staticDuration?.text ?? "",
-        distance: s.localizedValues?.distance?.text ?? "",
-        line: t?.transitLine?.nameShort ?? t?.transitLine?.name ?? null,
-        vehicle: t?.transitLine?.vehicle?.name?.text ?? null,
-        from: t?.stopDetails?.departureStop?.name ?? null,
-        to: t?.stopDetails?.arrivalStop?.name ?? null,
-        departure: t?.localizedValues?.departureTime?.time?.text ?? null,
-        arrival: t?.localizedValues?.arrivalTime?.time?.text ?? null,
-        stops: t?.stopCount ?? null,
-      };
-      const prev = steps[steps.length - 1];
-      if (mode === "TRANSIT" && !t && prev && !prev.vehicle) {
-        prev.instruction = "Walk";
-        continue;
-      }
-      if (mode === "TRANSIT" && !t) step.instruction = "Walk";
-      steps.push(step);
-    }
-    return {
-      mode,
-      found: true as const,
-      duration: route.localizedValues?.duration?.text ?? "",
-      distance: route.localizedValues?.distance?.text ?? "",
-      steps: mode === "DRIVE" ? steps.slice(0, 12) : steps,
-    };
+    type S = { distance: number; duration: number; name?: string; maneuver?: { type?: string; modifier?: string } };
+    const raw: S[] = route.legs?.flatMap((l: { steps?: S[] }) => l.steps ?? []) ?? [];
+    const steps: TransitStep[] = raw
+      .filter((s) => s.distance > 50 || s.maneuver?.type === "arrive")
+      .slice(0, 12)
+      .map((s) => {
+        const t = s.maneuver?.type ?? "continue";
+        const verb = t === "depart" ? "Head out" : t === "arrive" ? "Arrive at destination" : `${t.replace(/^\w/, (c) => c.toUpperCase())}${s.maneuver?.modifier ? ` ${s.maneuver.modifier}` : ""}`;
+        return {
+          mode: "DRIVE",
+          instruction: s.name && t !== "arrive" ? `${verb} on ${s.name}` : verb,
+          duration: fmtDur(s.duration), distance: fmtDist(s.distance),
+          line: null, vehicle: null, from: null, to: null, departure: null, arrival: null, stops: null,
+        };
+      });
+    return { mode, found: true as const, duration: fmtDur(route.duration), distance: fmtDist(route.distance), steps };
   });
 
 export const getTravelAdvice = createServerFn({ method: "POST" })
