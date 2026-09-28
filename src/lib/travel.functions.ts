@@ -1,3 +1,4 @@
+import { destinations } from "./destinations";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
@@ -49,35 +50,76 @@ type WikiPage = {
   pageviews?: Record<string, number | null>;
 };
 
-/** Free place data: OpenStreetMap geocoding + Wikipedia nearby articles ranked by reader popularity. */
+const WIKI = "https://en.wikipedia.org/w/api.php";
+const DETAIL_PROPS = {
+  prop: "coordinates|pageimages|description|extracts|pageviews",
+  piprop: "thumbnail", pithumbsize: "800", exintro: "1", explaintext: "1", exsentences: "2", exlimit: "max", pvipdays: "30",
+};
+
+/** Tourist spots tagged in OpenStreetMap (free Overpass API), returned as English Wikipedia titles. */
+async function osmAttractionTitles(lat: number, lng: number) {
+  const a = `around:20000,${lat},${lng}`;
+  const q = `[out:json][timeout:20];(nwr(${a})[tourism][wikipedia];nwr(${a})[historic][wikipedia];nwr(${a})[amenity=place_of_worship][wikipedia];nwr(${a})[leisure~"park|garden|nature_reserve"][wikipedia];);out tags 200;`;
+  try {
+    const res = await fetch("https://overpass-api.de/api/interpreter", {
+      method: "POST",
+      headers: { ...UA, "Content-Type": "application/x-www-form-urlencoded" },
+      body: `data=${encodeURIComponent(q)}`,
+      signal: AbortSignal.timeout(22000),
+    });
+    if (!res.ok) return [];
+    const j = (await res.json()) as { elements: { tags?: Record<string, string> }[] };
+    return j.elements.map((e) => e.tags?.["wikipedia"] ?? "").filter((w) => w.startsWith("en:")).map((w) => w.slice(3));
+  } catch {
+    return [];
+  }
+}
+
+async function wikiDetails(titles: string[]) {
+  const out: WikiPage[] = [];
+  for (let i = 0; i < titles.length; i += 50) {
+    const p = new URLSearchParams({ action: "query", format: "json", formatversion: "2", redirects: "1", titles: titles.slice(i, i + 50).join("|"), ...DETAIL_PROPS });
+    const j = await getJson(`${WIKI}?${p}`).catch(() => null);
+    out.push(...((j?.query?.pages ?? []) as WikiPage[]));
+  }
+  return out;
+}
+
+async function wikiNearby(lat: number, lng: number) {
+  const p = new URLSearchParams({ action: "query", format: "json", formatversion: "2", generator: "geosearch", ggscoord: `${lat}|${lng}`, ggsradius: "10000", ggslimit: "100", ...DETAIL_PROPS });
+  const j = await getJson(`${WIKI}?${p}`).catch(() => null);
+  return ((j?.query?.pages ?? []) as WikiPage[]).filter((pg) => !SKIP.test(`${pg.title} ${pg.description ?? ""}`));
+}
+
+/** Free place data: OpenStreetMap + Wikipedia, ranked by how many people read about each place. */
 export const searchPlaces = createServerFn({ method: "POST" })
   .inputValidator((d) => z.object({ query: z.string().trim().min(2).max(80), pageToken: z.string().max(500).optional() }).parse(d))
   .handler(async ({ data }) => {
     const loc = await geocode(`${data.query}, India`);
     if (!loc) return { places: [] as PlaceResult[], nextPageToken: null };
-    const params = new URLSearchParams({
-      action: "query", format: "json", formatversion: "2", origin: "*",
-      generator: "geosearch", ggscoord: `${loc.lat}|${loc.lng}`, ggsradius: "10000", ggslimit: "100",
-      prop: "coordinates|pageimages|description|extracts|pageviews",
-      piprop: "thumbnail", pithumbsize: "800", exintro: "1", explaintext: "1", exsentences: "2", exlimit: "max", pvipdays: "30",
-    });
-    const json = await getJson(`https://en.wikipedia.org/w/api.php?${params}`);
-    const pages: WikiPage[] = json.query?.pages ?? [];
+    const q = data.query.toLowerCase();
+    const curated = destinations.find((d) => d.city.toLowerCase() === q || d.state.toLowerCase() === q)?.places ?? [];
+    const osm = await osmAttractionTitles(loc.lat, loc.lng);
+    let pages = await wikiDetails([...new Set([...curated, ...osm])]);
+    pages = pages.filter((p) => p.coordinates?.[0] && !/disambiguation/i.test(p.description ?? ""));
+    if (pages.length < 20) pages.push(...(await wikiNearby(loc.lat, loc.lng)));
+    const seen = new Set<number>();
     const all: PlaceResult[] = pages
-      .filter((p) => p.coordinates?.[0] && !SKIP.test(`${p.title} ${p.description ?? ""}`) && p.title !== data.query)
+      .filter((p) => p.coordinates?.[0] && !seen.has(p.pageid) && seen.add(p.pageid) && p.title.toLowerCase() !== q)
       .map((p) => {
-        const views = Object.values(p.pageviews ?? {}).reduce<number>((a, v) => a + (v ?? 0), 0);
+        const c = p.coordinates![0]!;
+        const views = Object.values(p.pageviews ?? {}).reduce<number>((acc, v) => acc + (v ?? 0), 0);
         return {
           id: String(p.pageid),
-          name: p.title,
-          address: p.description ?? loc.name.split(",").slice(0, 2).join(","),
+          name: p.title.replace(/,\s*[^,]+$/, "").replace(/\s*\([^)]*\)$/, ""),
+          address: loc.name.split(",").slice(0, 2).join(","),
           rating: null,
           ratingCount: views,
           type: p.description ?? null,
           summary: p.extract ?? null,
-          mapsUrl: `https://www.openstreetmap.org/?mlat=${p.coordinates![0]!.lat}&mlon=${p.coordinates![0]!.lon}#map=17/${p.coordinates![0]!.lat}/${p.coordinates![0]!.lon}`,
-          lat: p.coordinates![0]!.lat,
-          lng: p.coordinates![0]!.lon,
+          mapsUrl: `https://www.openstreetmap.org/?mlat=${c.lat}&mlon=${c.lon}#map=17/${c.lat}/${c.lon}`,
+          lat: c.lat,
+          lng: c.lon,
           photoName: null,
           photoUri: p.thumbnail?.source ?? null,
           score: views + (p.thumbnail ? 500 : 0),
@@ -85,8 +127,7 @@ export const searchPlaces = createServerFn({ method: "POST" })
       })
       .sort((a, b) => b.score - a.score);
     const offset = Number(data.pageToken ?? 0) || 0;
-    const places = all.slice(offset, offset + 20);
-    return { places, nextPageToken: offset + 20 < all.length ? String(offset + 20) : null };
+    return { places: all.slice(offset, offset + 20), nextPageToken: offset + 20 < all.length ? String(offset + 20) : null };
   });
 
 export const getPlacePhoto = createServerFn({ method: "POST" })
