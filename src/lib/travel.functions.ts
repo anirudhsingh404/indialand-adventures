@@ -226,11 +226,76 @@ export const getDirections = createServerFn({ method: "POST" })
     return { mode, found: true as const, duration: fmtDur(route.duration), distance: fmtDist(route.distance), steps };
   });
 
+async function overpass(q: string) {
+  const res = await fetch("https://overpass-api.de/api/interpreter", {
+    method: "POST",
+    headers: { ...UA, "Content-Type": "application/x-www-form-urlencoded" },
+    body: `data=${encodeURIComponent(q)}`,
+    signal: AbortSignal.timeout(25000),
+  });
+  if (!res.ok) throw new Error("Map data is busy, try again in a moment");
+  return ((await res.json()) as { elements: { id: number; lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }[] }).elements;
+}
+
+export type Hotel = { id: string; name: string; kind: string; stars: number | null; tier: "backpacker" | "comfort" | "luxury"; lat: number; lng: number; website: string | null; mapsUrl: string };
+
+/** Free hotel listings from OpenStreetMap, sorted into budget tiers. */
+export const getHotels = createServerFn({ method: "POST" })
+  .inputValidator((d) => z.object({ lat: z.number(), lng: z.number() }).parse(d))
+  .handler(async ({ data }) => {
+    const a = `around:6000,${data.lat},${data.lng}`;
+    const els = await overpass(`[out:json][timeout:20];nwr(${a})[tourism~"^(hotel|hostel|guest_house)$"][name];out center tags 150;`);
+    const hotels: Hotel[] = els.map((e) => {
+      const t = e.tags ?? {};
+      const stars = Number.parseFloat(t["stars"] ?? "") || null;
+      const kind = t["tourism"] ?? "hotel";
+      const tier = kind !== "hotel" ? "backpacker" : stars && stars >= 4 ? "luxury" : "comfort";
+      const lat = e.lat ?? e.center?.lat ?? 0, lng = e.lon ?? e.center?.lon ?? 0;
+      return { id: String(e.id), name: t["name"]!, kind: kind.replace("_", " "), stars, tier, lat, lng, website: t["website"] ?? null, mapsUrl: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=18/${lat}/${lng}` };
+    });
+    return hotels.sort((x, y) => (y.stars ?? 0) - (x.stars ?? 0) || (y.website ? 1 : 0) - (x.website ? 1 : 0));
+  });
+
+export type Hub = { id: string; name: string; kind: "Metro" | "Railway" | "Bus stand"; lat: number; lng: number };
+
+/** Nearest metro, railway and bus stations from OpenStreetMap. */
+export const getTransitHubs = createServerFn({ method: "POST" })
+  .inputValidator((d) => z.object({ lat: z.number(), lng: z.number() }).parse(d))
+  .handler(async ({ data }) => {
+    const a = `around:8000,${data.lat},${data.lng}`;
+    const els = await overpass(`[out:json][timeout:20];(nwr(${a})[station=subway][name];nwr(${a})[railway=station][name];nwr(${a})[amenity=bus_station][name];);out center tags 120;`);
+    const seen = new Set<string>();
+    const hubs: Hub[] = [];
+    for (const e of els) {
+      const t = e.tags ?? {};
+      const kind = t["station"] === "subway" || t["subway"] === "yes" ? "Metro" : t["amenity"] === "bus_station" ? "Bus stand" : "Railway";
+      const key = `${kind}:${t["name"]}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      hubs.push({ id: String(e.id), name: t["name"]!, kind, lat: e.lat ?? e.center?.lat ?? 0, lng: e.lon ?? e.center?.lon ?? 0 });
+    }
+    const dist = (h: Hub) => (h.lat - data.lat) ** 2 + (h.lng - data.lng) ** 2;
+    return hubs.sort((x, y) => dist(x) - dist(y)).slice(0, 15);
+  });
+
+const GENERIC_ADVICE = {
+  scams: [
+    { title: "Fake 'official' guides", detail: "People near monuments claim to be government guides. Hire only licensed guides from the ticket counter and agree the fee first." },
+    { title: "Auto and taxi overcharging", detail: "Insist on the meter or use app cabs (Uber, Ola, Rapido). Ask locals the usual fare before boarding." },
+    { title: "'Closed today' detours", detail: "Strangers say your attraction is closed and offer a shop tour instead. Check timings online and walk on." },
+    { title: "Gem and carpet shop commissions", detail: "Drivers take you to shops promising resale profits. Never buy gems as an investment." },
+  ],
+  tips: ["Carry small cash for autos and stalls; UPI works almost everywhere.", "Buy train tickets on IRCTC or at official counters only.", "Drink sealed bottled water.", "Dress modestly for temples and remove shoes."],
+  bestTime: "October to March is pleasant across most of India; hills are best April–June.",
+  gettingThere: "Check the nearest airport and main railway station listed under 'Nearby transport'.",
+  localTransport: "Metro (where available) is cheapest and fastest; city buses ₹10–40; autos ₹30–150 short rides; app cabs for longer trips.",
+};
+
 export const getTravelAdvice = createServerFn({ method: "POST" })
   .inputValidator((d) => z.object({ place: z.string().trim().min(2).max(80) }).parse(d))
   .handler(async ({ data }) => {
     const key = process.env["LOVABLE_API_KEY"];
-    if (!key) throw new Error("AI is not configured");
+    if (!key) return { ...GENERIC_ADVICE, generic: true };
     const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -248,11 +313,8 @@ export const getTravelAdvice = createServerFn({ method: "POST" })
       }),
     });
     if (!res.ok) {
-      const body = await res.text();
-      console.error(`AI request failed [${res.status}]: ${body}`);
-      if (res.status === 429) throw new Error("Too many requests, try again shortly");
-      if (res.status === 402) throw new Error("AI credits are used up");
-      throw new Error("Could not load travel advice");
+      console.error(`AI request failed [${res.status}]: ${await res.text()}`);
+      return { ...GENERIC_ADVICE, generic: true };
     }
     const json = await res.json();
     const parsed = JSON.parse(json.choices?.[0]?.message?.content ?? "{}");
@@ -262,5 +324,6 @@ export const getTravelAdvice = createServerFn({ method: "POST" })
       bestTime: (parsed.bestTime ?? "") as string,
       gettingThere: (parsed.gettingThere ?? "") as string,
       localTransport: (parsed.localTransport ?? "") as string,
+      generic: false,
     };
   });

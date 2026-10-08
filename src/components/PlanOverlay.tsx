@@ -4,6 +4,7 @@ import { AlertTriangle, Bus, Car, CloudSun, Droplets, ExternalLink, Footprints, 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { getDirections, getPlacePhoto, getTravelAdvice, getWeather, searchPlaces, type PlaceResult } from "@/lib/travel.functions";
+import { TripPlanner } from "@/components/TripPlanner";
 
 export function PlanOverlay({ query, onClose }: { query: string; onClose: () => void }) {
   useEffect(() => {
@@ -50,6 +51,8 @@ function PlanContent({ query }: { query: string }) {
   const center = list[0];
 
   return (
+    <>
+    <TripPlanner city={query} places={list} />
     <div className="grid gap-8 lg:grid-cols-[1fr_380px]">
       <section>
         <div className="flex items-end justify-between gap-3">
@@ -75,6 +78,7 @@ function PlanContent({ query }: { query: string }) {
         <AdviceCard place={query} />
       </aside>
     </div>
+    </>
   );
 }
 
@@ -231,7 +235,7 @@ function AdviceCard({ place }: { place: string }) {
           {q.data.localTransport && <Info title="Local transport" body={q.data.localTransport} />}
           {q.data.bestTime && <Info title="Best time to visit" body={q.data.bestTime} />}
           {q.data.tips.length > 0 && <div><p className="font-semibold text-saffron">Tips</p><ul className="mt-1 list-disc pl-5 text-cream/70">{q.data.tips.map((t) => <li key={t}>{t}</li>)}</ul></div>}
-          <p className="text-xs text-cream/40">AI-generated guidance — double-check locally.</p>
+          <p className="text-xs text-cream/40">{q.data.generic ? "Common scams reported across India — double-check locally." : "AI-generated guidance — double-check locally."}</p>
         </div>
       )}
     </div>
