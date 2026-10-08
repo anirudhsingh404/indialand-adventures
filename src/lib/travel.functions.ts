@@ -313,11 +313,8 @@ export const getTravelAdvice = createServerFn({ method: "POST" })
       }),
     });
     if (!res.ok) {
-      const body = await res.text();
-      console.error(`AI request failed [${res.status}]: ${body}`);
-      if (res.status === 429) throw new Error("Too many requests, try again shortly");
-      if (res.status === 402) throw new Error("AI credits are used up");
-      throw new Error("Could not load travel advice");
+      console.error(`AI request failed [${res.status}]: ${await res.text()}`);
+      return { ...GENERIC_ADVICE, generic: true };
     }
     const json = await res.json();
     const parsed = JSON.parse(json.choices?.[0]?.message?.content ?? "{}");
@@ -327,5 +324,6 @@ export const getTravelAdvice = createServerFn({ method: "POST" })
       bestTime: (parsed.bestTime ?? "") as string,
       gettingThere: (parsed.gettingThere ?? "") as string,
       localTransport: (parsed.localTransport ?? "") as string,
+      generic: false,
     };
   });
