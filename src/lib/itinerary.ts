@@ -38,3 +38,24 @@ export function buildItinerary<T extends PlanPlace>(places: T[], days: number, i
 export function estimateCost(budget: Budget, days: number) {
   return (BUDGETS.find((b) => b.id === budget)?.perDay ?? 0) * days;
 }
+
+/** Which tier a custom daily budget (INR/person) falls into. */
+export function tierForAmount(perDay: number): Budget {
+  return perDay < 4000 ? "backpacker" : perDay < 12000 ? "comfort" : "luxury";
+}
+
+/** Split a daily budget: 45% stay, 25% food, 15% local travel, 15% tickets. */
+export function budgetSplit(perDay: number) {
+  const r = (f: number) => Math.round(perDay * f);
+  return { stay: r(0.45), food: r(0.25), travel: r(0.15), tickets: r(0.15) };
+}
+
+/** Typical nightly price (INR) for a stay type, used to match the user's budget. */
+export function estimateNightly(kind: string, stars: number | null) {
+  if (/hostel/i.test(kind)) return 700;
+  if (/guest|homestay|motel|apartment/i.test(kind)) return 1500;
+  if (stars && stars >= 5) return 12000;
+  if (stars && stars >= 4) return 7000;
+  if (stars && stars >= 3) return 3500;
+  return 2500;
+}

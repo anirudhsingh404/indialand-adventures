@@ -17,3 +17,18 @@ describe("itinerary", () => {
     expect(estimateCost("comfort", 3)).toBe(18000);
   });
 });
+
+import { budgetSplit, estimateNightly, tierForAmount } from "./itinerary";
+describe("custom budget", () => {
+  it("₹3,000/day is backpacker, ₹6,000 comfort, ₹15,000 luxury", () => {
+    expect(tierForAmount(3000)).toBe("backpacker");
+    expect(tierForAmount(6000)).toBe("comfort");
+    expect(tierForAmount(15000)).toBe("luxury");
+  });
+  it("45% of ₹4,000 goes to stay", () => {
+    expect(budgetSplit(4000).stay).toBe(1800);
+  });
+  it("a hostel fits a ₹1,000 stay budget", () => {
+    expect(estimateNightly("hostel", null)).toBeLessThanOrEqual(1000);
+  });
+});

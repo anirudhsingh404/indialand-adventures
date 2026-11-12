@@ -1,3 +1,4 @@
+import { estimateNightly } from "@/lib/itinerary";
 import { destinations } from "./destinations";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -59,7 +60,7 @@ const DETAIL_PROPS = {
 /** Tourist spots tagged in OpenStreetMap (free Overpass API), returned as English Wikipedia titles. */
 async function osmAttractionTitles(lat: number, lng: number) {
   const a = `around:20000,${lat},${lng}`;
-  const q = `[out:json][timeout:20];(nwr(${a})[tourism][wikipedia];nwr(${a})[historic][wikipedia];nwr(${a})[amenity=place_of_worship][wikipedia];nwr(${a})[leisure~"park|garden|nature_reserve"][wikipedia];);out tags 200;`;
+  const q = `[out:json][timeout:15];(nwr(${a})[tourism][wikipedia];nwr(${a})[historic][wikipedia];nwr(${a})[amenity=place_of_worship][wikipedia];nwr(${a})[leisure~"park|garden|nature_reserve"][wikipedia];);out tags 200;`;
   try {
     const res = await fetch("https://overpass-api.de/api/interpreter", {
       method: "POST",
@@ -226,34 +227,70 @@ export const getDirections = createServerFn({ method: "POST" })
     return { mode, found: true as const, duration: fmtDur(route.duration), distance: fmtDist(route.distance), steps };
   });
 
-async function overpass(q: string) {
-  const res = await fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    headers: { ...UA, "Content-Type": "application/x-www-form-urlencoded" },
-    body: `data=${encodeURIComponent(q)}`,
-    signal: AbortSignal.timeout(25000),
-  });
-  if (!res.ok) throw new Error("Map data is busy, try again in a moment");
-  return ((await res.json()) as { elements: { id: number; lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }[] }).elements;
+const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
+type OsmEl = { id: number; lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> };
+
+/** Query OpenStreetMap, trying several free mirrors so one busy server doesn't break the page. */
+async function overpass(q: string): Promise<OsmEl[]> {
+  for (const url of OVERPASS) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { ...UA, "Content-Type": "application/x-www-form-urlencoded" },
+        body: `data=${encodeURIComponent(q)}`,
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) continue;
+      const j = (await res.json()) as { elements?: OsmEl[] };
+      if (j.elements) return j.elements;
+    } catch { /* try next mirror */ }
+  }
+  return [];
 }
 
-export type Hotel = { id: string; name: string; kind: string; stars: number | null; tier: "backpacker" | "comfort" | "luxury"; lat: number; lng: number; website: string | null; mapsUrl: string };
+export type Eatery = { id: string; name: string; kind: string; cuisine: string | null; veg: boolean; label: "Popular" | "Underrated gem"; mapsUrl: string };
+
+/** Restaurants, cafes and street food nearby; well-documented ones are "Popular", the rest "Underrated gem". */
+export const getEateries = createServerFn({ method: "POST" })
+  .inputValidator((d) => z.object({ lat: z.number(), lng: z.number() }).parse(d))
+  .handler(async ({ data }) => {
+    const a = `around:4000,${data.lat},${data.lng}`;
+    const els = await overpass(`[out:json][timeout:15];nwr(${a})[amenity~"^(restaurant|cafe|fast_food|food_court)$"][name];out center tags 200;`);
+    const items: (Eatery & { score: number })[] = els.map((e) => {
+      const t = e.tags ?? {};
+      const score = (t["wikidata"] || t["wikipedia"] ? 3 : 0) + (t["brand"] ? 2 : 0) + (t["website"] ? 1 : 0) + (t["opening_hours"] ? 1 : 0);
+      const lat = e.lat ?? e.center?.lat ?? 0, lng = e.lon ?? e.center?.lon ?? 0;
+      return {
+        id: String(e.id), name: t["name"]!, kind: (t["amenity"] ?? "restaurant").replace("_", " "),
+        cuisine: t["cuisine"]?.split(";").slice(0, 2).join(", ").replace(/_/g, " ") ?? null,
+        veg: t["diet:vegetarian"] === "only" || t["diet:vegetarian"] === "yes",
+        label: score >= 2 ? "Popular" : "Underrated gem", score,
+        mapsUrl: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=18/${lat}/${lng}`,
+      };
+    });
+    const popular = items.filter((i) => i.label === "Popular").sort((x, y) => y.score - x.score).slice(0, 8);
+    const gems = items.filter((i) => i.label !== "Popular" && i.cuisine).slice(0, 8);
+    return [...popular, ...gems].map(({ score: _s, ...r }) => r);
+  });
+
+export type Hotel = { id: string; name: string; kind: string; stars: number | null; tier: "backpacker" | "comfort" | "luxury"; lat: number; lng: number; nightly: number; website: string | null; mapsUrl: string };
 
 /** Free hotel listings from OpenStreetMap, sorted into budget tiers. */
 export const getHotels = createServerFn({ method: "POST" })
   .inputValidator((d) => z.object({ lat: z.number(), lng: z.number() }).parse(d))
   .handler(async ({ data }) => {
     const a = `around:6000,${data.lat},${data.lng}`;
-    const els = await overpass(`[out:json][timeout:20];nwr(${a})[tourism~"^(hotel|hostel|guest_house)$"][name];out center tags 150;`);
+    const els = await overpass(`[out:json][timeout:15];nwr(${a})[tourism~"^(hotel|hostel|guest_house|motel|apartment)$"][name];out center tags 150;`);
     const hotels: Hotel[] = els.map((e) => {
       const t = e.tags ?? {};
       const stars = Number.parseFloat(t["stars"] ?? "") || null;
       const kind = t["tourism"] ?? "hotel";
       const tier = kind !== "hotel" ? "backpacker" : stars && stars >= 4 ? "luxury" : "comfort";
+      const nightly = estimateNightly(kind, stars);
       const lat = e.lat ?? e.center?.lat ?? 0, lng = e.lon ?? e.center?.lon ?? 0;
-      return { id: String(e.id), name: t["name"]!, kind: kind.replace("_", " "), stars, tier, lat, lng, website: t["website"] ?? null, mapsUrl: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=18/${lat}/${lng}` };
+      return { id: String(e.id), name: t["name"]!, kind: kind.replace("_", " "), stars, tier, lat, lng, nightly, website: t["website"] ?? null, mapsUrl: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=18/${lat}/${lng}` };
     });
-    return hotels.sort((x, y) => (y.stars ?? 0) - (x.stars ?? 0) || (y.website ? 1 : 0) - (x.website ? 1 : 0));
+    return hotels.sort((x, y) => x.nightly - y.nightly || (y.website ? 1 : 0) - (x.website ? 1 : 0));
   });
 
 export type Hub = { id: string; name: string; kind: "Metro" | "Railway" | "Bus stand"; lat: number; lng: number };
@@ -263,7 +300,7 @@ export const getTransitHubs = createServerFn({ method: "POST" })
   .inputValidator((d) => z.object({ lat: z.number(), lng: z.number() }).parse(d))
   .handler(async ({ data }) => {
     const a = `around:8000,${data.lat},${data.lng}`;
-    const els = await overpass(`[out:json][timeout:20];(nwr(${a})[station=subway][name];nwr(${a})[railway=station][name];nwr(${a})[amenity=bus_station][name];);out center tags 120;`);
+    const els = await overpass(`[out:json][timeout:15];(nwr(${a})[station=subway][name];nwr(${a})[railway=station][name];nwr(${a})[amenity=bus_station][name];);out center tags 120;`);
     const seen = new Set<string>();
     const hubs: Hub[] = [];
     for (const e of els) {

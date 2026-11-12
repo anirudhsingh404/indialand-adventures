@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Trash2 } from "lucide-react";
+import { CalendarDays, MapPin, Printer, Route as RouteIcon, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -40,9 +40,28 @@ function Trips() {
       <div className="mx-auto max-w-5xl">
         <div className="flex items-center justify-between">
           <Link to="/" className="font-display text-xl font-semibold">INDIA <span className="text-terracotta">LAND</span></Link>
-          <Button variant="ghost" className="text-cream hover:bg-cream/10" onClick={signOut}>Sign out</Button>
+          <div className="flex gap-2 print:hidden">
+            <Button variant="ghost" className="gap-2 text-cream hover:bg-cream/10" onClick={() => window.print()}><Printer className="size-4" /> Print</Button>
+            <Button variant="ghost" className="text-cream hover:bg-cream/10" onClick={signOut}>Sign out</Button>
+          </div>
         </div>
-        <h1 className="mt-8 font-display text-4xl font-semibold">My trips</h1>
+        <h1 className="mt-8 font-display text-4xl font-semibold">My trips dashboard</h1>
+        {q.data && q.data.length > 0 && (
+          <div className="mt-6 grid gap-4 sm:grid-cols-3">
+            {[
+              { icon: RouteIcon, label: "Trips planned", value: q.data.length },
+              { icon: CalendarDays, label: "Days of travel", value: q.data.reduce((n, t) => n + t.days, 0) },
+              { icon: MapPin, label: "Cities", value: new Set(q.data.map((t) => t.city)).size },
+            ].map((s) => (
+              <div key={s.label} className="animate-card-in rounded-xl border border-cream/10 bg-cream/5 p-5">
+                <s.icon className="size-5 text-saffron" />
+                <p className="mt-2 font-display text-3xl font-semibold">{s.value}</p>
+                <p className="text-sm text-cream/60">{s.label}</p>
+              </div>
+            ))}
+          </div>
+        )}
+        {q.data && q.data.length > 0 && <p className="mt-4 text-sm text-cream/60">Cities: {[...new Set(q.data.map((t) => t.city))].join(" · ")}</p>}
         {q.isPending && <p className="mt-4 text-cream/60">Loading…</p>}
         {q.data?.length === 0 && <p className="mt-4 text-cream/60">No saved trips yet. Search a city on the home page and press Save trip.</p>}
         <div className="mt-6 grid gap-5">
@@ -51,9 +70,9 @@ function Trips() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="font-display text-2xl font-semibold">{t.city}</h2>
-                  <p className="text-sm capitalize text-cream/60">{t.days} days · {t.budget}{t.interests.length ? ` · ${t.interests.join(", ")}` : ""}</p>
+                  <p className="text-sm text-cream/60">Saved {new Date(t.created_at).toLocaleDateString("en-IN")} · {t.days} days · {t.budget}{t.interests.length ? ` · ${t.interests.join(", ")}` : ""}</p>
                 </div>
-                <Button variant="ghost" size="icon" className="text-cream/60 hover:bg-cream/10" aria-label="Delete trip" onClick={() => del.mutate(t.id)}><Trash2 className="size-4" /></Button>
+                <Button variant="ghost" size="icon" className="text-cream/60 hover:bg-cream/10 print:hidden" aria-label="Delete trip" onClick={() => del.mutate(t.id)}><Trash2 className="size-4" /></Button>
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-3">
                 {(t.plan as { day: number; stops: Stop[] }[]).map((d) => (

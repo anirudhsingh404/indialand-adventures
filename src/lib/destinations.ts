@@ -113,6 +113,17 @@ export const destinations: Destination[] = [
       "Badi Lake", "Sajjangarh Biological Park",
     ],
   },
+  { city: "Agra", state: "Uttar Pradesh", places: ["Taj Mahal", "Agra Fort", "Fatehpur Sikri", "Itimad-ud-Daulah", "Mehtab Bagh", "Akbar's Tomb", "Jama Masjid Agra", "Kinari Bazaar", "Chini Ka Rauza", "Taj Museum", "Ram Bagh", "Mariam's Tomb"] },
+  { city: "Amritsar", state: "Punjab", places: ["Golden Temple", "Jallianwala Bagh", "Wagah Border", "Partition Museum", "Durgiana Temple", "Gobindgarh Fort", "Maharaja Ranjit Singh Museum", "Ram Tirath", "Hall Bazaar", "Khalsa College", "Akal Takht", "Gurudwara Baba Atal Rai"] },
+  { city: "Rishikesh", state: "Uttarakhand", places: ["Laxman Jhula", "Ram Jhula", "Triveni Ghat", "Beatles Ashram", "Parmarth Niketan", "Neelkanth Mahadev Temple", "Rajaji National Park", "Kunjapuri Temple", "Shivpuri", "Tera Manzil Temple", "Vashishta Gufa", "Neer Garh Waterfall"] },
+  { city: "Shimla", state: "Himachal Pradesh", places: ["The Ridge", "Mall Road", "Jakhoo Temple", "Christ Church", "Viceregal Lodge", "Kufri", "Chadwick Falls", "Annandale", "Tara Devi Temple", "Scandal Point", "Himachal State Museum", "Naldehra"] },
+  { city: "Leh", state: "Ladakh", places: ["Leh Palace", "Shanti Stupa", "Thiksey Monastery", "Hemis Monastery", "Pangong Lake", "Nubra Valley", "Khardung La", "Magnetic Hill", "Hall of Fame", "Spituk Monastery", "Shey Palace", "Diskit Monastery"] },
+  { city: "Kochi", state: "Kerala", places: ["Fort Kochi", "Chinese fishing nets", "Mattancherry Palace", "Paradesi Synagogue", "St. Francis Church", "Santa Cruz Cathedral Basilica", "Jew Town", "Marine Drive Kochi", "Hill Palace", "Cherai Beach", "Kerala Folklore Museum", "Bolgatty Palace"] },
+  { city: "Munnar", state: "Kerala", places: ["Eravikulam National Park", "Mattupetty Dam", "Anamudi", "Top Station", "Kundala Lake", "Attukal Waterfalls", "Tata Tea Museum", "Echo Point", "Lakkam Waterfalls", "Chinnar Wildlife Sanctuary", "Pothamedu View Point", "Blossom Park"] },
+  { city: "Mysuru", state: "Karnataka", places: ["Mysore Palace", "Chamundi Hills", "Brindavan Gardens", "St. Philomena's Church", "Mysore Zoo", "Jaganmohan Palace", "Srirangapatna", "Karanji Lake", "Devaraja Market", "Rail Museum Mysore", "Lalitha Mahal", "Ranganathittu Bird Sanctuary"] },
+  { city: "Shillong", state: "Meghalaya", places: ["Umiam Lake", "Elephant Falls", "Shillong Peak", "Ward's Lake", "Don Bosco Museum", "Police Bazaar", "Laitlum Canyons", "Mawlynnong", "Cherrapunji", "Nohkalikai Falls", "Living root bridges", "Dawki"] },
+  { city: "Darjeeling", state: "West Bengal", places: ["Tiger Hill", "Darjeeling Himalayan Railway", "Batasia Loop", "Padmaja Naidu Himalayan Zoological Park", "Himalayan Mountaineering Institute", "Peace Pagoda", "Ghum Monastery", "Happy Valley Tea Estate", "Darjeeling Mall", "Rock Garden", "Observatory Hill", "Japanese Peace Pagoda"] },
+  { city: "Madurai", state: "Tamil Nadu", places: ["Meenakshi Temple", "Thirumalai Nayakkar Mahal", "Gandhi Memorial Museum", "Alagar Koyil", "Vandiyur Mariamman Teppakulam", "Thiruparankundram", "Koodal Azhagar Temple", "Samanar Hills", "Pudhu Mandapam", "Athisayam", "Kazimar Big Mosque", "St. Mary's Cathedral Madurai"] },
 ];
 
 export const featuredCities = ["Kolkata", "Jaipur", "Mumbai", "Goa", "Varanasi", "Kochi"];
