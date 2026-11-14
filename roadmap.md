@@ -10,3 +10,5 @@
 - [x] Food spots tagged Popular / Underrated
 - [x] More destinations
 - [x] My Trips dashboard (stats, print)
+- [ ] Add useful, clearly labeled offline results for stays, local transit guidance, and food.
+- [ ] Test trip planning end-to-end on desktop and mobile, including budget edits and saved trips; fix issues found.
