@@ -1,5 +1,6 @@
 import { estimateNightly } from "@/lib/itinerary";
 import { destinations } from "./destinations";
+import { fallbackEateries, fallbackHotels, fallbackTransit } from "./travel-fallbacks";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
@@ -230,25 +231,36 @@ export const getDirections = createServerFn({ method: "POST" })
 const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
 type OsmEl = { id: number; lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> };
 
-/** Query OpenStreetMap, trying several free mirrors so one busy server doesn't break the page. */
+/** Query free OpenStreetMap mirrors together, returning quickly when data is unavailable. */
 async function overpass(q: string): Promise<OsmEl[]> {
-  for (const url of OVERPASS) {
-    try {
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const requests = OVERPASS.map(async (url) => {
       const res = await fetch(url, {
         method: "POST",
         headers: { ...UA, "Content-Type": "application/x-www-form-urlencoded" },
         body: `data=${encodeURIComponent(q)}`,
-        signal: AbortSignal.timeout(15000),
+        signal: controller.signal,
       });
-      if (!res.ok) continue;
+      if (!res.ok) throw new Error(`Map data unavailable [${res.status}]`);
       const j = (await res.json()) as { elements?: OsmEl[] };
-      if (j.elements) return j.elements;
-    } catch { /* try next mirror */ }
+      if (!j.elements?.length) throw new Error("No mapped results");
+      return j.elements;
+    });
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error("Map data timeout")), 8000);
+    });
+    return await Promise.race([Promise.any(requests), timeout]);
+  } catch {
+    return [];
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    controller.abort();
   }
-  return [];
 }
 
-export type Eatery = { id: string; name: string; kind: string; cuisine: string | null; veg: boolean; label: "Popular" | "Underrated gem"; mapsUrl: string };
+export type Eatery = { id: string; name: string; kind: string; cuisine: string | null; veg: boolean; label: "Popular" | "Underrated gem"; mapsUrl: string; fallback?: boolean };
 
 /** Restaurants, cafes and street food nearby; well-documented ones are "Popular", the rest "Underrated gem". */
 export const getEateries = createServerFn({ method: "POST" })
@@ -270,10 +282,12 @@ export const getEateries = createServerFn({ method: "POST" })
     });
     const popular = items.filter((i) => i.label === "Popular").sort((x, y) => y.score - x.score).slice(0, 8);
     const gems = items.filter((i) => i.label !== "Popular" && i.cuisine).slice(0, 8);
-    return [...popular, ...gems].map(({ score: _s, ...r }) => r);
+    const live = [...popular, ...gems].map(({ score: _s, ...r }) => r);
+    if (live.length > 0) return live;
+    return fallbackEateries(data.lat, data.lng).map(({ fallback: _fallback, ...r }) => ({ ...r, fallback: true }));
   });
 
-export type Hotel = { id: string; name: string; kind: string; stars: number | null; tier: "backpacker" | "comfort" | "luxury"; lat: number; lng: number; nightly: number; website: string | null; mapsUrl: string };
+export type Hotel = { id: string; name: string; kind: string; stars: number | null; tier: "backpacker" | "comfort" | "luxury"; lat: number; lng: number; nightly: number; website: string | null; mapsUrl: string; fallback?: boolean };
 
 /** Free hotel listings from OpenStreetMap, sorted into budget tiers. */
 export const getHotels = createServerFn({ method: "POST" })
@@ -290,10 +304,13 @@ export const getHotels = createServerFn({ method: "POST" })
       const lat = e.lat ?? e.center?.lat ?? 0, lng = e.lon ?? e.center?.lon ?? 0;
       return { id: String(e.id), name: t["name"]!, kind: kind.replace("_", " "), stars, tier, lat, lng, nightly, website: t["website"] ?? null, mapsUrl: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=18/${lat}/${lng}` };
     });
+    if (hotels.length === 0) {
+      return fallbackHotels(data.lat, data.lng).map(({ fallback: _fallback, ...h }) => ({ ...h, fallback: true }));
+    }
     return hotels.sort((x, y) => x.nightly - y.nightly || (y.website ? 1 : 0) - (x.website ? 1 : 0));
   });
 
-export type Hub = { id: string; name: string; kind: "Metro" | "Railway" | "Bus stand"; lat: number; lng: number };
+export type Hub = { id: string; name: string; kind: "Metro" | "Railway" | "Bus stand" | "Local bus"; lat: number; lng: number; fallback?: boolean; searchUrl?: string };
 
 /** Nearest metro, railway and bus stations from OpenStreetMap. */
 export const getTransitHubs = createServerFn({ method: "POST" })
@@ -312,6 +329,7 @@ export const getTransitHubs = createServerFn({ method: "POST" })
       hubs.push({ id: String(e.id), name: t["name"]!, kind, lat: e.lat ?? e.center?.lat ?? 0, lng: e.lon ?? e.center?.lon ?? 0 });
     }
     const dist = (h: Hub) => (h.lat - data.lat) ** 2 + (h.lng - data.lng) ** 2;
+    if (hubs.length === 0) return fallbackTransit(data.lat, data.lng);
     return hubs.sort((x, y) => dist(x) - dist(y)).slice(0, 15);
   });
 

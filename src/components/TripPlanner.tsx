@@ -115,9 +115,7 @@ export function TripPlanner({ city, places }: { city: string; places: PlaceResul
       {center && (
         <div className="mt-8 grid gap-6 lg:grid-cols-2">
           <Hubs lat={center.lat} lng={center.lng} />
-          {user ? <Hotels lat={center.lat} lng={center.lng} maxNightly={split.stay} /> : (
-            <div><h4 className="mb-3 flex items-center gap-2 font-display text-xl font-semibold"><BedDouble className="size-5" /> Hotels in your budget</h4><Locked what="Budget hotel picks" /></div>
-          )}
+          <Hotels lat={center.lat} lng={center.lng} maxNightly={split.stay} />
           <div className="lg:col-span-2"><Eateries lat={center.lat} lng={center.lng} /></div>
         </div>
       )}
@@ -134,11 +132,12 @@ function Hubs({ lat, lng }: { lat: number; lng: number }) {
       {q.isPending && <p className="text-sm text-cream/60">Finding metro, train and bus stations…</p>}
       {q.isError && <p className="text-sm text-cream/60">{q.error.message}</p>}
       {q.data && q.data.length === 0 && <p className="text-sm text-cream/60">No stations found right now — autos, city buses and app cabs (Uber, Ola, Rapido) cover every area. Metro cities: check the official metro app.</p>}
+      {q.data?.some((h) => h.fallback) && <p className="mb-2 text-xs text-cream/50">Map listings are temporarily unavailable. Open a live nearby search:</p>}
       <ul className="grid gap-2">
         {q.data?.map((h) => (
           <li key={h.id} className="flex items-center gap-3 rounded-lg bg-ink/50 px-3 py-2 text-sm">
             {h.kind === "Bus stand" ? <Bus className="size-4 text-saffron" /> : <TrainFront className="size-4 text-saffron" />}
-            <span className="flex-1">{h.name}</span>
+            {h.searchUrl ? <a className="flex-1 underline-offset-2 hover:underline" href={h.searchUrl} target="_blank" rel="noreferrer">{h.name}</a> : <span className="flex-1">{h.name}</span>}
             <span className="text-xs text-cream/50">{h.kind}</span>
           </li>
         ))}
@@ -158,6 +157,7 @@ function Hotels({ lat, lng, maxNightly }: { lat: number; lng: number; maxNightly
       <h4 className="mb-1 flex items-center gap-2 font-display text-xl font-semibold"><BedDouble className="size-5" /> Stays for ₹{maxNightly.toLocaleString("en-IN")}/night</h4>
       <p className="mb-3 text-xs text-cream/50">Hostels, guest houses, homestays and hotels · prices are typical estimates</p>
       {q.isPending && <p className="text-sm text-cream/60">Finding stays…</p>}
+      {list.some((h) => h.fallback) && <p className="mb-2 text-xs text-cream/50">Map listings are unavailable. These are budget search links; nightly amounts are planning estimates, not live quotes.</p>}
       {q.data && all.length === 0 && <p className="text-sm text-cream/60">No stays mapped nearby right now. Try again shortly.</p>}
       {q.data && all.length > 0 && inBudget.length === 0 && <p className="mb-2 text-sm text-cream/60">Nothing within this budget — showing the cheapest options.</p>}
       <ul className="grid gap-2">
@@ -182,6 +182,7 @@ function Eateries({ lat, lng }: { lat: number; lng: number }) {
       <h4 className="mb-3 flex items-center gap-2 font-display text-xl font-semibold"><UtensilsCrossed className="size-5" /> Best places to eat</h4>
       {q.isPending && <p className="text-sm text-cream/60">Finding food spots…</p>}
       {q.data && q.data.length === 0 && <p className="text-sm text-cream/60">No food spots mapped nearby right now. Try again shortly.</p>}
+      {q.data?.some((e) => e.fallback) && <p className="mb-2 text-xs text-cream/50">Curated local picks and nearby map searches while listings refresh.</p>}
       <ul className="grid gap-2 md:grid-cols-2">
         {q.data?.map((e) => (
           <li key={e.id} className="flex items-center gap-3 rounded-lg bg-ink/50 px-3 py-2 text-sm">
